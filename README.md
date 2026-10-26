@@ -25,6 +25,20 @@ build/tests/bt_tests
 Rust: rustup with toolchain 1.96.0 (`rust/rust-toolchain.toml`). Binaries:
 `build/chains/zside/thunder-orchard`, `thunder-orchard-cli`, `zside-fetch-blocks`.
 
+## The app (zside-app)
+
+Our sidechain app on this node: the sidechain template's window, trusted dialog and interface kit, with pages for
+zSide's two balances (transparent and shielded: shield, unshield, private payments with a memo, shielded addresses,
+the memos, the shielded pool); the node (`thunder-orchard`) runs as the app's child, unchanged (consensus and the
+LayerTwo RPC byte for byte), the app talking to its separate, authenticated app RPC. The same pages are a pack for the
+unified wallet. See `doc/app.md` and `core/doc/app.md`.
+
+```
+cmake -S . -B build-app -DBT_BUILD_APP=ON -DBT_KIT_DIR=<sidechain-template repo>   # GTK 3, WebKitGTK 4.1, npm
+~/skydoge/tools/build.sh ~/skydoge/backbone-zside build-app
+build-app/chains/zside/zside-app
+```
+
 ## Reproducible Rust inputs
 
 `rust/zside_orchard_ffi/Cargo.lock` pins every crate to the version in thunder-orchard's own

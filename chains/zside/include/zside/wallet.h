@@ -23,10 +23,12 @@
 #include <bt/hd.h>
 #include <bt/kv.h>
 
+#include <array>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
+#include <string_view>
 
 struct ZsBuilder; // orchard_ffi.h
 
@@ -60,10 +62,45 @@ struct WalletNote {
     Hash32 txid;
 };
 
+/**
+ * A note of the shielded account as the app layer shows it (doc/app.md): one the wallet received (decrypted with its
+ * incoming viewing key, either scope), or one it sent to another (recovered with its outgoing viewing key), with its
+ * memo. Read from the active chain and the mempool; never used to build a spend (scan() does that).
+ */
+struct ShieldedNote {
+    Hash32 txid;
+    std::optional<uint32_t> height; // nullopt: waiting in the mempool
+    bool incoming = true;           // to this wallet; false: sent to another
+    bool internal = false;          // to the wallet's internal scope (change)
+    uint64_t value = 0;
+    ShieldedAddress address; // the recipient
+    std::array<uint8_t, 512> memo{};
+    uint64_t position = 0;          // leaf index (a note of the chain)
+    std::optional<Hash32> spent_in; // incoming: the transaction that spent it
+    bool spent_pending = false;     // ... still in the mempool
+};
+
+/** The shielded account as the app layer shows it: its notes, what each transaction spent of them, the value balance
+ *  of every transaction with a bundle that touches the wallet, and what can be spent now. */
+struct ShieldedView {
+    std::vector<ShieldedNote> notes;
+    std::map<Hash32, uint64_t> spent_by_tx;
+    std::map<Hash32, int64_t> value_balance;
+    uint64_t available = 0; // unspent, not spent by a mempool transaction (balance's available_shielded)
+    uint64_t total = 0;     // unspent (balance's total_shielded)
+    uint64_t spendable = 0; // of available, the notes old enough to spend now (under the anchor 3 blocks below the tip)
+    uint64_t pending_in = 0; // to this wallet in mempool transactions
+};
+
 class Wallet {
 public:
     Wallet(const std::string& path, Node& node, KeyDerivation d = KeyDerivation::Blake3);
     bool has_seed();
+    KeyDerivation derivation() const { return deriv_; }
+    /** SHA-256(label 0x00 seed), or nothing without a seed: a public fingerprint of the seed (the app layer's), never the seed. */
+    std::optional<Hash32> seed_digest(std::string_view label);
+    /** The shielded account with memos (the app layer's pages). */
+    ShieldedView shielded_view();
     void set_seed(const bt::ByteArray<64>& seed);
     void set_seed_from_mnemonic(const std::string& mnemonic);
 
@@ -86,8 +123,9 @@ public:
     /** wallet/mod.rs create_shield_transaction(_from_utxos), without their optional note
      *  consolidation: transparent coins -> a new note of `value` (SPENDS_DISABLED, empty anchor). */
     Transaction create_shield(uint64_t value, uint64_t fee);
-    /** create_shielded_transaction: notes -> dest + change note; the fee leaves the pool. */
-    Transaction create_shielded_transfer(const ShieldedAddress& dest, uint64_t value, uint64_t fee);
+    /** create_shielded_transaction: notes -> dest + change note; the fee leaves the pool. `memo`: the recipient's
+     *  note's memo (512 bytes; the app layer's), none as LayerTwo's wallet writes it. */
+    Transaction create_shielded_transfer(const ShieldedAddress& dest, uint64_t value, uint64_t fee, const std::array<uint8_t, 512>* memo = nullptr);
     /** create_unshield_transaction: notes -> a transparent output of `value` + change note. */
     Transaction create_unshield(uint64_t value, uint64_t fee);
     /** Transparent authorizations over borsh(tx) (the create_* methods already signed the

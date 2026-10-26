@@ -11,4 +11,8 @@ if(BT_WITH_NET)
   # The node's P2P hardening, over QUIC on loopback.
   target_sources(bt_tests PRIVATE test_zside_node.cpp)
   target_link_libraries(bt_tests PRIVATE zside_node bt_net)
+  # The app layer (doc/app.md): the LayerTwo RPC the same with it, its reads, the phrase's flows, the shielded account,
+  # the manifest.
+  target_sources(bt_tests PRIVATE test_zside_appui.cpp)
+  target_compile_definitions(bt_tests PRIVATE BT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 endif()

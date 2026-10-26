@@ -157,6 +157,17 @@ void Wallet::set_seed(const bt::ByteArray<64>& s)
     t.commit();
 }
 
+std::optional<Hash32> Wallet::seed_digest(std::string_view label)
+{
+    std::lock_guard<std::mutex> l(mu_);
+    auto s = seed();
+    if (!s) return std::nullopt;
+    const uint8_t zero = 0;
+    Hash32 h = bt::sha256_parts({bt::ByteSpan(reinterpret_cast<const uint8_t*>(label.data()), label.size()), bt::ByteSpan(&zero, 1), s->span()});
+    sodium_memzero(s->data(), s->size());
+    return h;
+}
+
 void Wallet::set_seed_from_mnemonic(const std::string& mnemonic)
 {
     auto p = bt::hd::parse_mnemonic(mnemonic);
@@ -352,6 +363,105 @@ Wallet::Scan Wallet::scan()
 }
 
 std::vector<WalletNote> Wallet::notes() { return scan().notes; }
+
+// The app layer's view of the shielded account: what scan() finds, plus the memos, the notes the wallet sent to others
+// (recovered with its outgoing viewing key: the wallet's bundles are built with it), which transaction spent each note,
+// and the mempool's. Read only.
+ShieldedView Wallet::shielded_view()
+{
+    ShieldedView v;
+    auto sd = seed();
+    if (!sd) return v;
+    const auto sk = orchard_spending_key(*sd, deriv_);
+    sodium_memzero(sd->data(), sd->size());
+    const auto fvk = full_viewing_key(sk);
+    std::map<Hash32, size_t> by_nf;
+    uint64_t leaves = 0;
+    std::vector<uint64_t> leaves_at_end;
+    auto look = [&](const Transaction& tx, std::optional<uint32_t> height) {
+        if (!tx.orchard_bundle) return;
+        const auto& b = *tx.orchard_bundle;
+        const Hash32 txid = tx.txid();
+        bool touches = false;
+        for (const auto& a : b.actions) {
+            auto it = by_nf.find(a.nf);
+            if (it == by_nf.end()) continue;
+            ShieldedNote& n = v.notes[it->second];
+            if (n.spent_in) continue;
+            n.spent_in = txid;
+            n.spent_pending = !height;
+            v.spent_by_tx[txid] += n.value;
+            touches = true;
+        }
+        Bytes acts = orchard_ffi_actions(b);
+        ZsBundle* zb = zs_bundle_parse(acts.data(), b.actions.size(), b.flags, b.value_balance, b.anchor.data(), b.proof.data(), b.proof.size(), b.binding_sig.data());
+        if (zb) {
+            for (size_t i = 0; i < b.actions.size(); i++) {
+                bt::ByteArray<115> note;
+                uint8_t memo[512];
+                ShieldedNote n;
+                int32_t scope = zs_bundle_decrypt(zb, i, fvk.data(), note.data(), memo);
+                if (scope >= 0) {
+                    n.incoming = true;
+                    n.internal = scope == 1;
+                } else if (zs_bundle_recover(zb, i, fvk.data(), note.data(), memo) >= 0) {
+                    n.incoming = false;
+                } else {
+                    continue;
+                }
+                uint64_t value = 0;
+                for (int k = 7; k >= 0; k--) value = value << 8 | note[43 + k];
+                if (value == 0) continue; // the builder's dummy outputs; zero-value notes are not kept (wallet/mod.rs:1196)
+                n.txid = txid;
+                n.height = height;
+                n.value = value;
+                std::memcpy(n.address.b.data(), note.data(), 43);
+                std::memcpy(n.memo.data(), memo, 512);
+                n.position = leaves + i;
+                if (n.incoming) {
+                    Hash32 nf;
+                    zs_note_nullifier(note.data(), fvk.data(), nf.data());
+                    // A note of the mempool can be spent only once it is in a block: no nullifier to look for yet.
+                    if (height) by_nf[nf] = v.notes.size();
+                }
+                v.notes.push_back(n);
+                touches = true;
+            }
+            zs_bundle_free(zb);
+        }
+        if (touches) v.value_balance[txid] = b.value_balance;
+        if (height) leaves += b.actions.size();
+    };
+    const auto tip = node_.height();
+    if (tip)
+        for (uint32_t height = 0; height <= *tip; height++) {
+            auto bh = node_.block_hash_at(height);
+            auto body = bh ? node_.body(*bh) : std::nullopt;
+            if (!body) throw std::runtime_error("wallet scan: missing block " + std::to_string(height));
+            for (const auto& tx : body->transactions) look(tx, height);
+            leaves_at_end.push_back(leaves);
+        }
+    for (const auto& at : node_.mempool()) look(at.transaction, std::nullopt);
+    // Spendable now: a note under the anchor ANCHOR_CHECKPOINT_DEPTH blocks below the tip (select_notes).
+    uint64_t anchor_leaves = 0;
+    if (!leaves_at_end.empty()) {
+        const uint32_t t = uint32_t(leaves_at_end.size() - 1);
+        anchor_leaves = leaves_at_end[t - std::min(ANCHOR_CHECKPOINT_DEPTH, t)];
+    }
+    for (const auto& n : v.notes) {
+        if (!n.incoming) continue;
+        if (!n.height) {
+            v.pending_in += n.value;
+            continue;
+        }
+        if (n.spent_in && !n.spent_pending) continue;
+        v.total += n.value;
+        if (n.spent_in) continue;
+        v.available += n.value;
+        if (n.position < anchor_leaves) v.spendable += n.value;
+    }
+    return v;
+}
 
 // get_balance (:1521-1581): transparent from UTXOs (withdrawals not available) plus outputs
 // spent by unconfirmed txs; shielded from unspent notes plus notes spent by unconfirmed txs.
@@ -551,7 +661,7 @@ static std::pair<Hash32, std::vector<Spend>> select_notes(const Wallet::Scan& s,
     return {anchor, sel};
 }
 
-Transaction Wallet::create_shielded_transfer(const ShieldedAddress& dest, uint64_t value, uint64_t fee)
+Transaction Wallet::create_shielded_transfer(const ShieldedAddress& dest, uint64_t value, uint64_t fee, const std::array<uint8_t, 512>* memo)
 {
     auto s = scan();
     uint64_t total = 0;
@@ -561,7 +671,7 @@ Transaction Wallet::create_shielded_transfer(const ShieldedAddress& dest, uint64
     Transaction tx;
     tx.proof = node_.tip_accumulator().prove({}).value_or(bt::utreexo::Proof{});
     BuilderGuard g{zs_builder_new(0x03, false, anchor.data(), fvk.data(), 1)};
-    if (!g.b || zs_builder_add_output(g.b, dest.b.data(), value, nullptr) != 0 ||
+    if (!g.b || zs_builder_add_output(g.b, dest.b.data(), value, memo ? memo->data() : nullptr) != 0 ||
         zs_builder_add_output(g.b, change_addr.b.data(), total - value - fee, nullptr) != 0)
         throw std::runtime_error("orchard output");
     for (auto& sp : spends)

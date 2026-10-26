@@ -44,8 +44,8 @@ target_link_libraries(zside_core PUBLIC bt_core zside_orchard_ffi)
 target_sources(zside_core PRIVATE src/net.cpp src/archive.cpp src/json.cpp)
 
 if(BT_WITH_NET)
-  add_library(zside_node STATIC src/node.cpp src/wallet.cpp src/app.cpp)
-  target_link_libraries(zside_node PUBLIC zside_core bt_net)
+  add_library(zside_node STATIC src/node.cpp src/wallet.cpp src/app.cpp src/appui.cpp)
+  target_link_libraries(zside_node PUBLIC zside_core bt_net bt_appui)
   # Their release binaries: thunder-orchard (thunder_orchard_app) and thunder-orchard-cli.
   add_executable(thunder-orchard src/main.cpp)
   target_link_libraries(thunder-orchard PRIVATE zside_node)
