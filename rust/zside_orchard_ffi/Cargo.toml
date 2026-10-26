@@ -1,0 +1,30 @@
+[package]
+name = "zside_orchard_ffi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "zSide drop-in: the reference Orchard crates (orchard 0.14.0 / halo2) behind a small C ABI, pinned to thunder-orchard v0.18.1's Cargo.lock"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+# Pinned to EXACTLY the versions in thunder-orchard b225827 Cargo.lock (consensus depends on them).
+orchard = "=0.14.0"
+halo2_proofs = "=0.3.2"
+incrementalmerkletree = "=0.8.2"
+nonempty = "=0.11.0"
+zip32 = "=0.2.0"
+reddsa = "=0.5.1"
+zcash_note_encryption = "=0.4.1"
+pasta_curves = "=0.5.1"
+rand_core = { version = "0.6", features = ["getrandom"] }
+subtle = "2.6"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+panic = "abort"
+debug = false
