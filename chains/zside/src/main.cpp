@@ -11,6 +11,7 @@
 #include <zside/app.h>
 #include <zside/appui.h>
 
+#include <bt/agent.h>
 #include <bt/frost.h>
 #include <bt/fsperm.h>
 #include <bt/hd.h>
@@ -29,7 +30,7 @@
 using namespace zside;
 
 static const char* VERSION = "0.18.1";
-static const char* OUR_VERSION = "backbone-zside 0.1.0 (thunder-orchard 0.18.1 compatible)";
+static const std::string OUR_VERSION = bt::agent() + " (Backbone drop-in; thunder-orchard 0.18.1 compatible)";
 
 static std::atomic<bool> g_stop{false};
 static void on_signal(int) { g_stop = true; }
@@ -153,7 +154,7 @@ int main(int argc, char** argv)
             usage();
             return 0;
         } else if (a == "-V" || a == "--version") {
-            std::printf("thunder_orchard_app %s\n%s\n", VERSION, OUR_VERSION);
+            std::printf("thunder_orchard_app %s\n%s\n", VERSION, OUR_VERSION.c_str());
             return 0;
         } else if (a == "--add-peer") {
             if (!next(v)) return 2;
@@ -250,7 +251,7 @@ int main(int argc, char** argv)
     bt::log::set_file(logs, log_level_file);
     for (auto& u : unknown) LOG_WARN("ignoring unknown argument '%s'", u.c_str());
     if (!headless) LOG_INFO("no GUI in this build; running headless");
-    LOG_INFO("%s starting: datadir %s, network magic override %s, mainchain %s", OUR_VERSION, cfg.datadir.c_str(),
+    LOG_INFO("%s starting: datadir %s, network magic override %s, mainchain %s", OUR_VERSION.c_str(), cfg.datadir.c_str(),
              cfg.magic_override ? "yes" : "no", cfg.mainchain_grpc_url.c_str());
 
     std::signal(SIGINT, on_signal);

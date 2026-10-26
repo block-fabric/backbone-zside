@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(backbone_zside VERSION 0.1.0 LANGUAGES C CXX)
+project(backbone_zside VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,10 @@ endif()
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/CMakeLists.txt")
   message(FATAL_ERROR "core/ is empty: run `git submodule update --init`")
 endif()
+# Our name and version (core's bt/agent.h): in our QUIC certificate's CN, "<Name> <version> (Backbone drop-in)",
+# the one place a peer can read it (the protocol has no user-agent field), and in the startup log.
+set(BT_AGENT_NAME "zSide")
+set(BT_AGENT_VERSION "${PROJECT_VERSION}")
 add_subdirectory(core)
 
 add_subdirectory(chains/zside)
@@ -26,7 +30,7 @@ add_subdirectory(chains/zside)
 option(BT_BUILD_APP "Build zside-app" OFF)
 if(BT_BUILD_APP)
   include(core/cmake/BtDesktopApp.cmake)
-  bt_desktop_app(zside-app STEM zside NAME zSide VERSION ${PROJECT_VERSION}
+  bt_desktop_app(zside-app STEM zside NAME ${BT_AGENT_NAME} VERSION ${BT_AGENT_VERSION}
                  CHAIN ${CMAKE_SOURCE_DIR}/app/chain MANIFEST ${CMAKE_SOURCE_DIR}/app/manifest.json
                  KIT_COMMIT_FILE ${CMAKE_SOURCE_DIR}/app/kit.commit MAIN ${CMAKE_SOURCE_DIR}/chains/zside/app/main.cpp NODE_TARGET thunder-orchard)
 endif()

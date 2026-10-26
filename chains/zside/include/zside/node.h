@@ -48,6 +48,7 @@ struct PeerView {
     bt::quic::SockAddr address;
     bool connected = false;
     bool inbound = false;
+    std::string name; // bt::quic::Endpoint::peer_name: "<Name> <version>", "unknown (upstream)", "unknown"; empty until connected
 };
 
 class Node {
@@ -142,6 +143,7 @@ private:
         bt::quic::SockAddr addr;
         std::string dial; // host:port we dialed (empty for inbound)
         bool connected = false, inbound = false;
+        std::string name; // bt::quic::Endpoint::peer_name
         std::optional<net::PeerState> state;
         std::set<Hash32> requested_blocks;
         bool headers_pending = false;
