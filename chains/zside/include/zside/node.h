@@ -67,6 +67,9 @@ public:
     // ---- queries (all take the node lock)
     std::optional<Hash32> tip();
     std::optional<uint32_t> height();
+    /** The height of our block last anchored on the mainchain that we know (bt::sidechain::anchored_height): the floor of
+     *  the network's height in the app's sync status, display only. */
+    std::optional<uint32_t> anchored_height();
     std::optional<Hash32> block_hash_at(uint32_t height);
     std::optional<Header> header(const Hash32& h);
     std::optional<Body> body(const Hash32& h);

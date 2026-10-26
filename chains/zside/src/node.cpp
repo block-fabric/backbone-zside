@@ -2,6 +2,7 @@
 // Distributed under the MIT software license.
 #include <zside/node.h>
 
+#include <bt/sidechain/anchor.h>
 #include <bt/fsperm.h>
 #include <bt/log.h>
 #include <bt/parse.h>
@@ -133,6 +134,12 @@ std::optional<uint32_t> Node::height()
     std::lock_guard<std::recursive_mutex> l(mu_);
     Txn t(*store_);
     return state_.height(t);
+}
+std::optional<uint32_t> Node::anchored_height()
+{
+    std::lock_guard<std::recursive_mutex> l(mu_);
+    Txn t(*store_);
+    return bt::sidechain::anchored_height(archive_, t, side_tips_.mainchain_tip(t));
 }
 std::optional<Hash32> Node::block_hash_at(uint32_t h)
 {
